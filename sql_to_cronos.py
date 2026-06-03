@@ -190,6 +190,12 @@ def parse_csv(path: str, progress_cb=None) -> list:
     except Exception:
         delimiter = ','
 
+    # Оцениваем число строк по выборке (fh.tell() нельзя использовать
+    # внутри csv-итератора — Python запрещает его после next())
+    sample_lines = max(sample.count('\n'), 1)
+    sample_bytes = max(len(sample.encode(encoding, errors='replace')), 1)
+    est_total_rows = max(1, int(sample_lines * file_size / sample_bytes))
+
     records = []; fields = []
     with open(path, encoding=encoding, errors='replace', newline='') as fh:
         reader = csv.DictReader(fh, delimiter=delimiter)
@@ -197,7 +203,9 @@ def parse_csv(path: str, progress_cb=None) -> list:
         for i, row in enumerate(reader):
             records.append(dict(row))
             if progress_cb and i % 10000 == 0:
-                progress_cb(fh.tell(), file_size)
+                # переводим номер строки в примерные байты для прогресс-бара
+                est_bytes = int(i / est_total_rows * file_size)
+                progress_cb(est_bytes, file_size)
 
     return [{"name": table_name, "fields": fields, "records": records}]
 
