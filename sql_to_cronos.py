@@ -286,6 +286,80 @@ def parse_csv_folder(folder: str, progress_cb=None) -> list:
 
 
 # ═══════════════════════════════════════════════════════════════════
+#  SQLite-парсер (.db / .sqlite / .sqlite3)
+# ═══════════════════════════════════════════════════════════════════
+
+def parse_sqlite(path: str, progress_cb=None, limit: int = 0) -> list:
+    """Читает все таблицы из SQLite-базы.
+
+    limit > 0 — ограничить число строк на таблицу (применяется в SQL,
+    не загружая лишнее в память).
+    """
+    import sqlite3 as _sqlite3
+    con = _sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        tbl_names = [
+            row[0] for row in con.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name NOT LIKE 'sqlite_%' "
+                "ORDER BY name"
+            ).fetchall()
+        ]
+        result = []
+        for t_idx, tbl in enumerate(tbl_names):
+            cols = [row[1] for row in
+                    con.execute(f'PRAGMA table_info("{tbl}")').fetchall()]
+            total_rows = con.execute(
+                f'SELECT count(*) FROM "{tbl}"'
+            ).fetchone()[0]
+
+            cap = limit if limit > 0 else total_rows
+            records = []
+            BATCH = 50_000
+            offset = 0
+            while offset < cap:
+                fetch = min(BATCH, cap - offset)
+                rows = con.execute(
+                    f'SELECT * FROM "{tbl}" LIMIT {fetch} OFFSET {offset}'
+                ).fetchall()
+                if not rows:
+                    break
+                for row in rows:
+                    records.append({
+                        cols[i]: ('' if v is None else str(v))
+                        for i, v in enumerate(row)
+                    })
+                offset += len(rows)
+                if progress_cb:
+                    progress_cb(
+                        int((t_idx + offset / max(cap, 1)) / max(len(tbl_names), 1) * 100),
+                        100
+                    )
+
+            result.append({
+                "name": tbl,
+                "fields": cols,
+                "records": records,
+                "_sqlite_total": total_rows,
+            })
+        return result
+    finally:
+        con.close()
+
+
+def _is_sqlite(path: str) -> bool:
+    """True если файл — SQLite-база (по магическому заголовку или расширению)."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in ('.db', '.sqlite', '.sqlite3'):
+        return True
+    try:
+        with open(path, 'rb') as fh:
+            return fh.read(16) == b'SQLite format 3\x00'
+    except OSError:
+        return False
+
+
+# ═══════════════════════════════════════════════════════════════════
 #  Встроенный Cronos-читатель (без внешних зависимостей)
 # ═══════════════════════════════════════════════════════════════════
 
@@ -777,7 +851,7 @@ class App(Tk):
 
     def _build_import_tab(self,p):
         pad=dict(padx=8,pady=3)
-        f1=LabelFrame(p,text=" Исходный файл или папка (SQL / CSV / папка с CSV) ")
+        f1=LabelFrame(p,text=" Исходный файл или папка (SQL / CSV / SQLite .db / папка с CSV) ")
         f1.pack(fill=X,**pad)
         self.src_var=StringVar()
         Entry(f1,textvariable=self.src_var,width=60).pack(side=LEFT,padx=6,pady=5,fill=X,expand=True)
@@ -961,7 +1035,7 @@ class App(Tk):
 
     def _pick_src_file(self):
         p=filedialog.askopenfilename(title="Исходный файл",
-            filetypes=[("SQL/CSV","*.sql *.csv"),("All","*.*")])
+            filetypes=[("SQL/CSV/SQLite","*.sql *.csv *.db *.sqlite *.sqlite3"),("All","*.*")])
         if p:
             self.src_var.set(p); base=os.path.splitext(os.path.basename(p))[0]
             if self.name_var.get() in ("export",""): self.name_var.set(base)
@@ -1033,13 +1107,25 @@ class App(Tk):
                 def prog(d,t): self._i_set(f"Файл {d}/{t}",int(d/max(t,1)*50))
                 tables=parse_csv_folder(src,progress_cb=prog)
             else:
-                ext=os.path.splitext(src)[1].lower()
                 mb=os.path.getsize(src)/1024/1024
                 self._ilog(f"Файл: {os.path.basename(src)} ({mb:.1f} MB)")
-                self._ilog(f"Кодировка: {detect_encoding(src)}")
                 self._i_set("Чтение...",0)
                 def prog(d,t): self._i_set(f"Парсинг: {d/1024/1024:.1f}/{t/1024/1024:.1f} MB",int(d/max(t,1)*50))
-                tables=parse_csv(src,progress_cb=prog) if ext=='.csv' else parse_sql(src,progress_cb=prog)
+                def prog_pct(d,t): self._i_set(f"Парсинг: {d}/{t}%",int(d/max(t,1)*50))
+                if _is_sqlite(src):
+                    self._ilog("Формат: SQLite")
+                    tables=parse_sqlite(src,progress_cb=prog_pct,limit=limit)
+                    for t in tables:
+                        tot=t.pop("_sqlite_total",len(t["records"]))
+                        if limit>0 and tot>limit:
+                            self._ilog(f"  {t['name']:40s} {len(t['records']):>10,} записей (всего {tot:,}, лимит {limit:,})")
+                        else:
+                            self._ilog(f"  {t['name']:40s} {len(t['records']):>10,} записей")
+                    limit=0  # уже применён внутри parse_sqlite
+                else:
+                    ext=os.path.splitext(src)[1].lower()
+                    self._ilog(f"Кодировка: {detect_encoding(src)}")
+                    tables=parse_csv(src,progress_cb=prog) if ext=='.csv' else parse_sql(src,progress_cb=prog)
 
             self._ilog(f"\nНайдено таблиц: {len(tables)}")
             for t in tables: self._ilog(f"  {t['name']:40s} {len(t['records']):>10,} записей  ({len(t['fields'])} полей)")
@@ -1120,7 +1206,7 @@ class App(Tk):
 
     def _j_pick_file(self):
         p=filedialog.askopenfilename(title="Файл данных",
-            filetypes=[("SQL/CSV","*.sql *.csv"),("All","*.*")])
+            filetypes=[("SQL/CSV/SQLite","*.sql *.csv *.db *.sqlite *.sqlite3"),("All","*.*")])
         if p: self.j_src_var.set(p)
 
     def _j_pick_folder(self):
@@ -1148,8 +1234,12 @@ class App(Tk):
                 else:
                     tables=parse_csv_folder(src)
             else:
-                ext=os.path.splitext(src)[1].lower()
-                tables=parse_csv(src) if ext=='.csv' else parse_sql(src)
+                if _is_sqlite(src):
+                    tables=parse_sqlite(src)
+                    for t in tables: t.pop("_sqlite_total",None)
+                else:
+                    ext=os.path.splitext(src)[1].lower()
+                    tables=parse_csv(src) if ext=='.csv' else parse_sql(src)
 
             self._tables_cache.extend(tables)
             self._j_refresh_tables()
@@ -1262,14 +1352,24 @@ def cli_main():
 
     if os.path.isdir(args.source):
         tables=parse_csv_folder(args.source,progress_cb=pp)
+        for t in tables: print(f"  {t['name']:40s} {len(t['records']):>10,} зап  ({len(t['fields'])} полей)")
+        if args.limit>0:
+            for t in tables: t["records"]=t["records"][:args.limit]
+    elif _is_sqlite(args.source):
+        print("Формат: SQLite")
+        tables=parse_sqlite(args.source,progress_cb=pp,limit=args.limit)
+        print()
+        for t in tables:
+            tot=t.pop("_sqlite_total",len(t["records"]))
+            cap=f"/{tot:,}" if args.limit>0 and tot>args.limit else ""
+            print(f"  {t['name']:40s} {len(t['records']):>10,}{cap} зап  ({len(t['fields'])} полей)")
     else:
         ext=os.path.splitext(args.source)[1].lower()
         tables=parse_csv(args.source,progress_cb=pp) if ext=='.csv' else parse_sql(args.source,progress_cb=pp)
-    print()
-    for t in tables: print(f"  {t['name']:40s} {len(t['records']):>10,} зап  ({len(t['fields'])} полей)")
-
-    if args.limit>0:
-        for t in tables: t["records"]=t["records"][:args.limit]
+        print()
+        for t in tables: print(f"  {t['name']:40s} {len(t['records']):>10,} зап  ({len(t['fields'])} полей)")
+        if args.limit>0:
+            for t in tables: t["records"]=t["records"][:args.limit]
 
     print("\nНормализация...")
     tables=normalize_tables(tables,log_cb=print,
