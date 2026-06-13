@@ -2,37 +2,55 @@ name: Build Windows EXE
 
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch:        # кнопка «Run workflow» вручную
+    branches: [main, master]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python 3.11
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install PyInstaller
-        run: pip install pyinstaller
+      - name: Install dependencies
+        run: pip install pyinstaller flask cronodump chardet
 
-      - name: Build EXE
-        run: |
-          pyinstaller ^
-            --onefile ^
-            --windowed ^
-            --name "CronosConverter" ^
-            sql_to_cronos.py
+      - name: Build
         shell: cmd
+        run: |
+          python -m PyInstaller ^
+            --onedir ^
+            --console ^
+            --name "cronos_mac" ^
+            --add-data "web;web" ^
+            --add-data "core;core" ^
+            --hidden-import flask ^
+            --hidden-import flask.templating ^
+            --hidden-import jinja2 ^
+            --hidden-import jinja2.ext ^
+            --hidden-import chardet ^
+            --hidden-import crodump ^
+            --hidden-import crodump.crofile ^
+            --hidden-import crodump.crodump ^
+            --hidden-import crodump.crobankfile ^
+            --hidden-import werkzeug ^
+            --hidden-import werkzeug.serving ^
+            --hidden-import werkzeug.routing ^
+            --hidden-import werkzeug.middleware ^
+            --hidden-import werkzeug.middleware.shared_data ^
+            --hidden-import click ^
+            --hidden-import itsdangerous ^
+            --collect-all crodump ^
+            launcher.py
 
-      - name: Upload EXE artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CronosConverter-Windows
-          path: dist\CronosConverter.exe
+          name: CronosMac-Windows
+          path: dist/cronos_mac/
           retention-days: 30
