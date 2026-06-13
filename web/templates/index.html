@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <title>CronosMac</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<script src="/static/vis-network.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,sans-serif;background:#0f1117;color:#e2e8f0;min-height:100vh}
@@ -54,11 +53,8 @@ input[type=file],input[type=text]{width:100%;padding:6px 8px;border-radius:6px;b
 .search-bar{padding:16px 20px;background:#1a1d27;border-bottom:1px solid #2d3148;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .search-bar input{flex:1;min-width:200px;padding:9px 14px;border-radius:8px;border:1px solid #2d3148;background:#0f1117;color:#e2e8f0;font-size:.95rem}
 .search-bar select{padding:8px 10px;border-radius:8px;border:1px solid #2d3148;background:#0f1117;color:#e2e8f0;font-size:.85rem}
-.content-area{flex:1;display:grid;grid-template-rows:1fr 300px;overflow:hidden}
-.results-pane{overflow-y:auto;padding:16px 20px}
-.graph-pane{border-top:1px solid #2d3148;position:relative}
-#graph-container{width:100%;height:100%;background:#0f1117}
-.graph-label{position:absolute;top:8px;left:12px;font-size:.75rem;color:#64748b}
+.content-area{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.results-pane{flex:1;overflow-y:auto;padding:16px 20px}
 
 /* results */
 .results-count{font-size:.82rem;color:#64748b;margin-bottom:12px}
@@ -180,16 +176,11 @@ input[type=file],input[type=text]{width:100%;padding:6px 8px;border-radius:6px;b
           </div>
         </div>
       </div>
-      <div class="graph-pane">
-        <div class="graph-label" id="graph-label">Граф связей (перекрёстный поиск)</div>
-        <div id="graph-container"></div>
-      </div>
     </div>
   </main>
 </div>
 
 <script>
-let network = null;
 const selectedSources = new Set();
 
 function switchTab(name, el) {
@@ -352,39 +343,7 @@ function renderResults(results, query) {
 }
 
 function renderGraph(nodes, edges) {
-  if (!nodes || !nodes.length) return;
-  const container = document.getElementById('graph-container');
-  document.getElementById('graph-label').textContent =
-    `Граф связей · ${nodes.length} узлов · ${edges.length} связей`;
-
-  const palette = {};
-  const colors  = ['#4f46e5','#0891b2','#059669','#d97706','#dc2626','#7c3aed'];
-  let ci = 0;
-  function color(group) {
-    if (!palette[group]) palette[group] = colors[ci++ % colors.length];
-    return palette[group];
-  }
-
-  const vNodes = new vis.DataSet(nodes.map(n => ({
-    id: n.id,
-    label: n.label + '\n' + Object.values(n.data).filter(Boolean).slice(0,2).join(' | '),
-    color: { background: color(n.group), border: '#1a1d27' },
-    font: { color: '#e2e8f0', size: 11 },
-    shape: 'dot', size: 12
-  })));
-  const vEdges = new vis.DataSet(edges.map((e,i) => ({
-    id: i, from: e.from, to: e.to, label: e.label,
-    color: { color: '#374151' }, font: { color: '#9ca3af', size: 9 }, arrows: 'to'
-  })));
-
-  if (network) network.destroy();
-  network = new vis.Network(container,
-    { nodes: vNodes, edges: vEdges },
-    { physics: { solver: 'forceAtlas2Based' },
-      interaction: { hover: true },
-      edges: { smooth: { type: 'continuous' } }
-    }
-  );
+  // graph removed — no vis-network dependency
 }
 
 function esc(s) {
