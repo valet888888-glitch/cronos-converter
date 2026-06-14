@@ -65,12 +65,11 @@ def _encode_field(idx: int, name: str, typ: int, maxval: int = 256) -> bytes:
     d += struct.pack("<L", idx)
     d += _name(name)
     d += struct.pack("<L", 0)              # flags
-    d += bytes([1 if typ else 0])          # minval
+    d += bytes([1])                        # minval = always 1
     if typ:
         d += struct.pack("<L", idx)        # idx2
         d += struct.pack("<L", maxval)     # maxval
-        d += struct.pack("<L", 0x10019)    # unk4
-        d += b"\x00" * 13                 # section-2 padding (ignored by reader)
+        d += struct.pack("<L", 9)          # unk4 = 0x00000009 (standard value)
     return bytes(d)
 
 
