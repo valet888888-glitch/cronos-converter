@@ -9,6 +9,7 @@ if not getattr(sys, 'frozen', False):
     if os.path.isdir(_sp):
         sys.path.insert(0, _sp)
 
+import tempfile
 from flask import Flask, request, jsonify, render_template, redirect, url_for
 from core.db import init_db
 from core.search import search, search_cross, list_sources
@@ -38,8 +39,7 @@ init_db()
 
 @app.get('/')
 def index():
-    sources = list_sources()
-    return render_template('index.html', sources=sources)
+    return render_template('index.html')
 
 
 # ── API ────────────────────────────────────────────────────────────────────
@@ -65,7 +65,7 @@ def api_import_csv():
     if 'file' not in request.files:
         return jsonify({"error": "no file"}), 400
     f = request.files['file']
-    path = os.path.join('/tmp', f.filename)
+    path = os.path.join(tempfile.gettempdir(), f.filename)
     f.save(path)
     stats = import_csv(path, source_name=f.filename)
     return jsonify({"ok": True, "stats": stats})
@@ -76,7 +76,7 @@ def api_import_sql():
     if 'file' not in request.files:
         return jsonify({"error": "no file"}), 400
     f = request.files['file']
-    path = os.path.join('/tmp', f.filename)
+    path = os.path.join(tempfile.gettempdir(), f.filename)
     f.save(path)
     stats = import_sql(path, source_name=f.filename)
     return jsonify({"ok": True, "stats": stats})
