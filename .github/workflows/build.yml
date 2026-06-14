@@ -18,14 +18,14 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install pyinstaller flask cronodump chardet
+        run: pip install pyinstaller flask cronodump chardet pywebview
 
       - name: Build
         shell: cmd
         run: |
           python -m PyInstaller ^
             --onedir ^
-            --console ^
+            --windowed ^
             --name "cronos_mac" ^
             --add-data "web;web" ^
             --add-data "core;core" ^
@@ -45,7 +45,11 @@ jobs:
             --hidden-import werkzeug.middleware.shared_data ^
             --hidden-import click ^
             --hidden-import itsdangerous ^
+            --hidden-import webview ^
+            --hidden-import webview.platforms ^
+            --hidden-import webview.platforms.winforms ^
             --collect-all crodump ^
+            --collect-all webview ^
             launcher.py
 
       - name: Upload artifact

@@ -1,3 +1,4 @@
 flask>=3.0.0
 cronodump>=1.1.0
 chardet>=5.0.0
+pywebview>=5.0.0

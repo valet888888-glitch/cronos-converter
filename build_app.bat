@@ -1,26 +1,20 @@
 @echo off
 REM ============================================================
-REM  Сборка CronosMac  (папка cronos_mac\ + cronos_mac.exe)
-REM  Требует: pip install pyinstaller flask cronodump chardet
+REM  Сборка CronosMac.exe — нативное окно, без браузера и терминала
+REM  Требует: pip install pyinstaller flask cronodump chardet pywebview
 REM ============================================================
 
-echo Проверка PyInstaller...
-python -m PyInstaller --version >nul 2>&1
-if errorlevel 1 (
-    echo Устанавливаю PyInstaller...
-    pip install pyinstaller
-)
+echo Установка зависимостей...
+pip install pyinstaller flask cronodump chardet pywebview >nul 2>&1
 
-REM Очищаем предыдущую сборку
 if exist dist\cronos_mac rmdir /s /q dist\cronos_mac
 if exist build\cronos_mac rmdir /s /q build\cronos_mac
 
-echo.
 echo Сборка...
 
 python -m PyInstaller ^
     --onedir ^
-    --console ^
+    --windowed ^
     --name "cronos_mac" ^
     --add-data "web;web" ^
     --add-data "core;core" ^
@@ -40,24 +34,21 @@ python -m PyInstaller ^
     --hidden-import werkzeug.middleware.shared_data ^
     --hidden-import click ^
     --hidden-import itsdangerous ^
+    --hidden-import webview ^
+    --hidden-import webview.platforms ^
+    --hidden-import webview.platforms.winforms ^
     --collect-all crodump ^
+    --collect-all webview ^
     launcher.py
 
 echo.
 if exist dist\cronos_mac\cronos_mac.exe (
-    echo.
     echo ================================================
-    echo  Готово!  Папка: dist\cronos_mac\
-    echo.
-    echo  Структура:
-    echo    dist\cronos_mac\
-    echo      cronos_mac.exe    ^<-- запускать этот файл
-    echo      _internal\        ^<-- не трогать
-    echo      data\             ^<-- создастся при первом запуске
-    echo.
-    echo  Для переноса: скопируйте всю папку cronos_mac\
+    echo  Готово: dist\cronos_mac\
+    echo  Запуск: cronos_mac.exe
+    echo  Без браузера. Без терминала. Без Python.
     echo ================================================
 ) else (
-    echo ОШИБКА: exe не создан, проверьте вывод выше
+    echo ОШИБКА: exe не создан
 )
 pause
