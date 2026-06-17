@@ -65,11 +65,12 @@ def _encode_field(idx: int, name: str, typ: int, maxval: int = 256) -> bytes:
     d += struct.pack("<L", idx)
     d += _name(name)
     d += struct.pack("<L", 0)              # flags
-    d += bytes([1])                        # minval = always 1
+    d += bytes([1 if typ else 0])          # minval: 0 for sysnum, 1 for others
     if typ:
         d += struct.pack("<L", idx)        # idx2
         d += struct.pack("<L", maxval)     # maxval
-        d += struct.pack("<L", 9)          # unk4 = 0x00000009 (standard value)
+        d += struct.pack("<L", 0x10019)    # unk4 — confirmed value from real Cronos 5 files
+        d += b"\x00" * 13                 # trailing zeros — present in all real Cronos 5 files
     return bytes(d)
 
 
@@ -154,9 +155,9 @@ def _encode_dbdef(db_name: str, table_recnos: list) -> bytes:
     d += _name("NS2")
     d += _inline(struct.pack("<L", 0x57))
 
-    # Version
+    # Version — b"\x2d\x35" = ASCII "-5" (Cronos 5 marker; "-6" caused rejection in Cronos 5)
     d += _name("Version")
-    d += _inline(b"\x2d\x36")
+    d += _inline(b"\x2d\x35")
 
     return bytes(d)
 
