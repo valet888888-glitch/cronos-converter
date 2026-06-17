@@ -1,9 +1,12 @@
 """
 Import CSV / SQL / TXT files into unified DB.
 """
-import csv, json, os, io, re
+import csv, json, os, io, re, sys
 import chardet
-csv.field_size_limit(2_147_483_647)  # max int on 32-bit; handles any real field
+try:
+    csv.field_size_limit(sys.maxsize)
+except OverflowError:
+    csv.field_size_limit(2_147_483_647)
 from .db import get_conn
 
 

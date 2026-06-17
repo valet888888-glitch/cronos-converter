@@ -56,6 +56,7 @@ def search_cross(query: str, limit: int = 500) -> dict:
     related = {}
     for val in list(candidate_values)[:50]:  # cap to avoid explosion
         try:
+            fts_phrase = '"' + val.replace('"', '""') + '"'
             rows = conn.execute("""
                 SELECT r.id, r.source_id, r.table_name, r.rec_id, r.data,
                        s.name AS source_name
@@ -64,7 +65,7 @@ def search_cross(query: str, limit: int = 500) -> dict:
                 JOIN sources s ON s.id = r.source_id
                 WHERE records_fts MATCH ?
                 LIMIT 20
-            """, (json.dumps(val)[1:-1],)).fetchall()
+            """, (fts_phrase,)).fetchall()
             for row in rows:
                 if row["id"] not in related:
                     related[row["id"]] = {

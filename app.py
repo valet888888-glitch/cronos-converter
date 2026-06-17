@@ -1,7 +1,7 @@
 """
 CronosMac — веб-интерфейс для поиска по базам CronosPRO, CSV и SQL-дампам.
 """
-import os, json, sys
+import os, json, sys, uuid, traceback
 
 if not getattr(sys, 'frozen', False):
     # В обычном режиме — добавляем путь к site-packages если нужно
@@ -65,10 +65,21 @@ def api_import_csv():
     if 'file' not in request.files:
         return jsonify({"error": "no file"}), 400
     f = request.files['file']
-    path = os.path.join(tempfile.gettempdir(), f.filename)
+    orig_name = f.filename or 'file.csv'
+    ext = os.path.splitext(orig_name)[1].lower() or '.csv'
+    path = os.path.join(tempfile.gettempdir(), f'cm_{uuid.uuid4().hex}{ext}')
     f.save(path)
-    stats = import_csv(path, source_name=f.filename)
-    return jsonify({"ok": True, "stats": stats})
+    try:
+        stats = import_csv(path, source_name=orig_name)
+        return jsonify({"ok": True, "stats": stats})
+    except Exception as e:
+        app.logger.error(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 @app.post('/api/import/sql')
@@ -76,10 +87,21 @@ def api_import_sql():
     if 'file' not in request.files:
         return jsonify({"error": "no file"}), 400
     f = request.files['file']
-    path = os.path.join(tempfile.gettempdir(), f.filename)
+    orig_name = f.filename or 'file.sql'
+    ext = os.path.splitext(orig_name)[1].lower() or '.sql'
+    path = os.path.join(tempfile.gettempdir(), f'cm_{uuid.uuid4().hex}{ext}')
     f.save(path)
-    stats = import_sql(path, source_name=f.filename)
-    return jsonify({"ok": True, "stats": stats})
+    try:
+        stats = import_sql(path, source_name=orig_name)
+        return jsonify({"ok": True, "stats": stats})
+    except Exception as e:
+        app.logger.error(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 @app.post('/api/import/path')
@@ -217,33 +239,48 @@ def api_export_cronos_multi():
         ).fetchall()
         for tr in table_rows:
             tname = tr["table_name"]
-            q = "SELECT data FROM records WHERE source_id=? AND table_name=?"
-            params = [source_id, tname]
-            if limit > 0:
-                q += " LIMIT ?"
-                params.append(limit)
-            recs = conn.execute(q, params).fetchall()
-            records = []
+            # Field list from first 100 rows
+            sample_rows = conn.execute(
+                "SELECT data FROM records WHERE source_id=? AND table_name=? LIMIT 100",
+                (source_id, tname)
+            ).fetchall()
             fields_set = []
-            for rec in recs:
-                r = json.loads(rec["data"])
-                records.append(r)
-                for k in r:
+            for rec in sample_rows:
+                for k in json.loads(rec["data"]):
                     if k not in fields_set:
                         fields_set.append(k)
-            tables.append({"name": tname, "fields": fields_set, "records": records})
-    conn.close()
+            # Generator streams all records without loading into RAM
+            def _make_gen(sid, tn, lim):
+                q = "SELECT data FROM records WHERE source_id=? AND table_name=?"
+                p = [sid, tn]
+                if lim > 0:
+                    q += " LIMIT ?"
+                    p.append(lim)
+                cur = conn.execute(q, p)
+                while True:
+                    batch = cur.fetchmany(500)
+                    if not batch:
+                        break
+                    for r in batch:
+                        yield json.loads(r["data"])
+            tables.append({"name": tname, "fields": fields_set,
+                           "records": _make_gen(source_id, tname, limit)})
 
     if missing:
+        conn.close()
         return jsonify({"error": f"Sources not found: {missing}"}), 404
     if not tables:
+        conn.close()
         return jsonify({"error": "No data to export"}), 400
 
     try:
         stats = write_cronos(tables, output_dir, db_name=db_name)
         return jsonify({"ok": True, "stats": stats})
     except Exception as e:
+        app.logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
 
 
 @app.post('/api/convert/batch')

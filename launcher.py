@@ -7,6 +7,7 @@ import sys
 import os
 import threading
 import time
+import urllib.request
 
 if getattr(sys, 'frozen', False):
     os.chdir(os.path.dirname(sys.executable))
@@ -52,10 +53,20 @@ class _Api:
         return True
 
 
+def _wait_flask(port, timeout=20):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            urllib.request.urlopen(f'http://127.0.0.1:{port}/', timeout=0.5)
+            return
+        except Exception:
+            time.sleep(0.1)
+
+
 def main():
     t = threading.Thread(target=_run_flask, daemon=True)
     t.start()
-    time.sleep(1.2)
+    _wait_flask(PORT)
 
     import webview
 

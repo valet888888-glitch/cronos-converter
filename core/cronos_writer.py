@@ -4,7 +4,7 @@ Converts table data (list of dicts) into CroBank.dat/tad + CroStru.dat/tad files
 
 Format: v3 (01.02), 32-bit offsets, no KOD encryption, no compression.
 """
-import sys, os, struct, json, re, sqlite3
+import sys, os, struct, json, re, sqlite3, itertools
 
 sys.path.insert(0, '/Users/greguar_x/Library/Python/3.9/lib/python/site-packages')
 from crodump import koddecoder
@@ -221,6 +221,29 @@ def _encode_bank_record(tableid: int, fields: list, row: dict) -> bytes:
     return bytes([tableid]) + b"\x1e".join(parts)
 
 
+# ── Streaming CroBank writer ──────────────────────────────────────────────────
+
+def _write_bank_streaming(records_iter, dat_path, tad_path, blocksize=0x0040):
+    """Write CroBank .dat/.tad directly from a record iterator — zero extra RAM."""
+    with open(dat_path, 'wb') as df, open(tad_path, 'wb') as tf:
+        df.write(b"CroFile\x00")
+        df.write(struct.pack("<H", 0))
+        df.write(b"01.02")
+        df.write(struct.pack("<H", 0))
+        df.write(struct.pack("<H", blocksize))
+        df.write(b"\x00" * 0xE9)
+        tf.write(struct.pack("<LL", 0, 0))
+        for rec in records_iter:
+            offset = df.tell()
+            ln = len(rec)
+            tf.write(struct.pack("<LLL", offset, (0x80 << 24) | ln, 0))
+            df.write(rec)
+        df.flush()
+        os.fsync(df.fileno())
+        tf.flush()
+        os.fsync(tf.fileno())
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def write_cronos(tables: list, output_dir: str, db_name: str = "export") -> dict:
@@ -239,16 +262,11 @@ def write_cronos(tables: list, output_dir: str, db_name: str = "export") -> dict
     os.makedirs(output_dir, exist_ok=True)
     stats = {"tables": 0, "records": 0}
 
-    stru = _CroFileWriter(blocksize=0x0200)
-    bank = _CroFileWriter(blocksize=0x0040)
-    index = _CroFileWriter(blocksize=0x0400)  # empty index
+    stru  = _CroFileWriter(blocksize=0x0200)
+    index = _CroFileWriter(blocksize=0x0400)
 
-    # We'll assign CroStru record numbers starting at 2
-    # (rec #1 = DB definition, so tables start at rec #2)
-    table_recnos = []
-
-    # Also build an index of (table_id, tableid) for CroBank
-    table_entries = []
+    table_recnos  = []
+    table_entries = []  # (tableid, all_fields, records_iterable)
 
     for t_idx, table in enumerate(tables):
         tableid = t_idx + 1
@@ -256,60 +274,60 @@ def write_cronos(tables: list, output_dir: str, db_name: str = "export") -> dict
         fnames  = table.get("fields", [])
         records = table.get("records", [])
 
-        # Strip sysnum from incoming fields — we always add it ourselves
         user_fields = [f for f in fnames if f not in ("Системный номер", "__recno__")]
-
-        # Infer field types from data sample
-        sample_size = min(100, len(records))
-        field_defs  = [_encode_field(0, "Системный номер", 0)]  # sysnum always first
         all_fields  = ["Системный номер"] + user_fields
 
+        # Support both list and generator: peek first 100 for type inference
+        if isinstance(records, (list, tuple)):
+            sample       = records[:100]
+            records_iter = iter(records)
+        else:
+            it           = iter(records)
+            sample       = list(itertools.islice(it, 100))
+            records_iter = itertools.chain(sample, it)
+
+        field_defs = [_encode_field(0, "Системный номер", 0)]
         for i, fname in enumerate(user_fields, 1):
-            samples = [r.get(fname, "") for r in records[:sample_size]]
+            samples = [r.get(fname, "") for r in sample]
             typ, maxval = _infer_type(samples)
             field_defs.append(_encode_field(i, fname, typ, maxval))
 
-        # Encode TableDefinition and add to CroStru
         tdef_bytes = _encode_table(tableid, tname, field_defs)
-        # CroStru record: 0x04 prefix + TableDefinition bytes
-        stru_recno = len(stru._records) + 1  # will be 1-based after adding rec#1 later
+        stru_recno = len(stru._records) + 1
         stru.add_record(b"\x04" + tdef_bytes)
         table_recnos.append(stru_recno)
-        table_entries.append((tableid, all_fields, records))
-
+        table_entries.append((tableid, all_fields, records_iter))
         stats["tables"] += 1
-        stats["records"] += len(records)
 
-    # Build DB definition (CroStru rec #1) — must be first record
-    # Adjust recnos: they should be 1-indexed; TableDefs are at positions 1..N
-    # But we inserted them already at positions 0..N-1 in stru._records
-    # DB def will be prepended → TableDef records shift to 2..N+1
     adjusted_recnos = [i + 2 for i in range(len(tables))]
     dbdef_bytes = _encode_dbdef(db_name, adjusted_recnos)
-
-    # Prepend DB definition as the first record
     stru._records.insert(0, dbdef_bytes)
 
-    # Write CroBank records
-    for tableid, all_fields, records in table_entries:
-        for rec_idx, row in enumerate(records):
-            bank.add_record(_encode_bank_record(tableid, all_fields, row))
-
-    # Build binary files
+    # Write CroStru and CroIndex (small, in memory)
     stru_dat, stru_tad   = stru.build()
-    bank_dat, bank_tad   = bank.build()
     index_dat, index_tad = index.build()
-
-    # Write files — fsync ensures data reaches removable drives
     for fname, data in [
         ("CroStru.dat", stru_dat), ("CroStru.tad", stru_tad),
-        ("CroBank.dat", bank_dat), ("CroBank.tad", bank_tad),
         ("CroIndex.dat", index_dat), ("CroIndex.tad", index_tad),
     ]:
         with open(os.path.join(output_dir, fname), "wb") as f:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
+
+    # Stream CroBank directly to disk — no full in-memory copy
+    def _bank_gen():
+        for tableid, all_fields, rec_iter in table_entries:
+            for row in rec_iter:
+                stats["records"] += 1
+                yield _encode_bank_record(tableid, all_fields, row)
+
+    _write_bank_streaming(
+        _bank_gen(),
+        os.path.join(output_dir, "CroBank.dat"),
+        os.path.join(output_dir, "CroBank.tad"),
+        blocksize=0x0040,
+    )
 
     stats["output_dir"] = output_dir
     stats["files"] = ["CroStru.dat", "CroStru.tad", "CroBank.dat",
