@@ -4,7 +4,7 @@ Converts table data (list of dicts) into CroBank.dat/tad + CroStru.dat/tad files
 
 Format: v3 (01.02), 32-bit offsets, no KOD encryption, no compression.
 """
-import sys, os, struct, json, re, sqlite3, itertools
+import sys, os, struct, json, re, sqlite3, itertools, hashlib, time
 
 sys.path.insert(0, '/Users/greguar_x/Library/Python/3.9/lib/python/site-packages')
 from crodump import koddecoder
@@ -119,8 +119,12 @@ def _encode_dbdef(db_name: str, table_recnos: list) -> bytes:
     d += _name("Bank")
     d += _inline(b"\x00\x02" + b"\x00" * 9)
 
+    # Unique 8-digit decimal ID — avoids conflict when multiple banks share the same
+    # Cronos registry (CroSys.dat). Hardcoded "00000001" conflicts with existing banks.
+    h = int(hashlib.md5(db_name.encode('utf-8', errors='replace')).hexdigest(), 16)
+    bank_id_str = str((h % 89999998) + 10000001)  # range [10000001, 99999999]
     d += _name("BankId")
-    d += _inline(b"00000001")
+    d += _inline(bank_id_str.encode('ascii'))
 
     name_b = db_name.encode('cp1251', errors='replace')
     d += _name("BankName")
