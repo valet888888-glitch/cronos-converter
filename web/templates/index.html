@@ -104,7 +104,10 @@ textarea{resize:vertical;font-family:inherit}
         <div class="hint" style="margin-bottom:6px">Пути к файлам CSV/SQL/TXT — каждый с новой строки</div>
         <textarea id="batch-paths" rows="4" placeholder="C:\data\file1.csv&#10;C:\data\file2.sql"></textarea>
         <input type="text" id="batch-dbname" placeholder="Название банка Cronos">
-        <input type="text" id="batch-outdir" placeholder="Папка вывода">
+        <div style="display:flex;gap:6px;margin-bottom:6px">
+          <input type="text" id="batch-outdir" placeholder="Папка вывода" style="margin-bottom:0;flex:1">
+          <button class="btn btn-sm" style="background:#1e293b;color:#94a3b8;border:1px solid #2d3148;white-space:nowrap" onclick="browseFolder('batch-outdir')">Обзор…</button>
+        </div>
         <button class="btn btn-primary btn-sm" onclick="convertBatch()">Конвертировать в один банк</button>
         <div class="status-msg" id="batch-status"></div>
       </div>
@@ -123,12 +126,18 @@ textarea{resize:vertical;font-family:inherit}
       <div class="field-label">Название банка</div>
       <input type="text" id="exp-dbname" placeholder="MyDB">
 
-      <div class="field-label">Папка вывода (полный путь)</div>
-      <input type="text" id="exp-outdir" placeholder="C:\Cronos\Export">
+      <div class="field-label">Папка вывода</div>
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        <input type="text" id="exp-outdir" placeholder="C:\Cronos\Export" style="margin-bottom:0;flex:1">
+        <button class="btn btn-sm" style="background:#1e293b;color:#94a3b8;border:1px solid #2d3148;white-space:nowrap" onclick="browseFolder('exp-outdir')">Обзор…</button>
+      </div>
 
       <button class="btn btn-primary" onclick="exportSelected()">Экспортировать в Cronos</button>
 
       <div class="export-log" id="export-log">Выберите источники и нажмите «Экспортировать»</div>
+      <div id="open-folder-btn" style="display:none;margin-top:8px">
+        <button class="btn btn-sm" style="background:#14532d;color:#86efac;border:1px solid #166534" onclick="openExportedFolder()">Открыть папку в проводнике</button>
+      </div>
     </div>
   </main>
 </div>
@@ -173,6 +182,25 @@ function toggleSource(card, name) {
     n ? `${n} источник(ов) выбрано: ${[...selectedSources].join(', ')}` : 'Ничего не выбрано';
 }
 
+let _lastExportDir = '';
+
+async function browseFolder(inputId) {
+  try {
+    if (window.pywebview && window.pywebview.api) {
+      const path = await window.pywebview.api.browse_folder();
+      if (path) document.getElementById(inputId).value = path;
+    }
+  } catch(e) { /* pywebview недоступен — пользователь вводит вручную */ }
+}
+
+async function openExportedFolder() {
+  try {
+    if (window.pywebview && window.pywebview.api && _lastExportDir) {
+      await window.pywebview.api.open_folder(_lastExportDir);
+    }
+  } catch(e) {}
+}
+
 async function exportSelected() {
   const log    = document.getElementById('export-log');
   const outdir = document.getElementById('exp-outdir').value.trim();
@@ -188,9 +216,12 @@ async function exportSelected() {
   const j = await r.json();
   if (j.ok) {
     const s = j.stats;
+    _lastExportDir = outdir;
     log.textContent = `✓ Готово!\nТаблиц: ${s.tables}\nЗаписей: ${s.records}\nФайлы: ${(s.files||[]).join(', ')}\nПапка: ${outdir}`;
+    document.getElementById('open-folder-btn').style.display = 'block';
   } else {
     log.textContent = '✗ Ошибка: ' + (j.error||'неизвестная');
+    document.getElementById('open-folder-btn').style.display = 'none';
   }
 }
 
