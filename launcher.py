@@ -86,7 +86,7 @@ def main():
     # Option 1: native window via pywebview
     try:
         import webview
-        webview.create_window('CronosMac v20', url,
+        webview.create_window('CronosMac v21', url,
                               width=1280, height=820, min_size=(900, 600))
         webview.start()
         return

@@ -223,9 +223,14 @@ class _CroFileWriter:
         kod = koddecoder.new()
         for i, rec in enumerate(self._records):
             encdata = kod.encode(i + 1, rec) if (self.encoding & 1) else rec
+            # v4 record layout: [8 zero bytes][content_len dword][content][zero padding]
+            # All CronosPRO v4 file records use flags=0x08 and must be padded to blocksize
+            with_header = b"\x00" * 8 + struct.pack("<L", len(encdata)) + encdata
+            padded_len = ((len(with_header) + self.blocksize - 1) // self.blocksize) * self.blocksize
+            padded = with_header + b"\x00" * (padded_len - len(with_header))
             offset = len(dat)
-            _write_tad_entry_bytes(tad, offset, len(encdata))
-            dat += encdata
+            _write_tad_entry_bytes(tad, offset, padded_len, flags=0x08)
+            dat += padded
 
         return bytes(dat), bytes(tad)
 
