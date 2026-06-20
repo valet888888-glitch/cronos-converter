@@ -50,9 +50,8 @@ def _infer_type(values: list) -> tuple:
         return 4, 10
 
     max_len = max(len(str(v)) for v in non_empty)
-    if max_len > 500:
-        return 3, 65535  # TEXT
-    return 2, max(max_len + 50, 64)  # VARCHAR
+    # Use type 2 (VARCHAR) for all text — type 3 (Dictionary) requires Voc folder
+    return 2, min(max(max_len + 50, 64), 65535)
 
 
 # ── FieldDefinition encoder ─────────────────────────────────────────────────
