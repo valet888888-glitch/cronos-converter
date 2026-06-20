@@ -247,10 +247,9 @@ _SAFE_CTRL = frozenset([0x09, 0x0a, 0x0d])  # TAB, LF, CR are OK in values
 
 def _encode_bank_record(tableid: int, fields: list, row: dict) -> bytes:
     """
-    Build a CroBank record: tableid byte + field values separated by 0x1E.
-    fields is a list of field names (index 0 = Системный номер, skip it).
-    Strip control bytes 0x00-0x1f (except TAB/LF/CR) to prevent
-    0x1b (complex-record marker) and 0x1e (field separator) from corrupting reads.
+    Build a CroBank v4 record.
+    v4 format: [8 zero bytes] + [4-byte LE content_len] + [tableid byte] + [fields sep by 0x1E]
+    TAD flags must be 0x08 (inline v4 record).
     """
     parts = []
     for fname in fields[1:]:
@@ -258,7 +257,8 @@ def _encode_bank_record(tableid: int, fields: list, row: dict) -> bytes:
         enc = val.encode('cp1251', errors='replace')
         enc = bytes(b for b in enc if b >= 0x20 or b in _SAFE_CTRL)
         parts.append(enc)
-    return bytes([tableid]) + b"\x1e".join(parts)
+    content = bytes([tableid]) + b"\x1e".join(parts)
+    return b"\x00" * 8 + struct.pack("<L", len(content)) + content
 
 
 # ── Streaming CroBank writer ──────────────────────────────────────────────────
@@ -271,7 +271,7 @@ def _write_bank_streaming(records_iter, dat_path, tad_path, blocksize=0x0040):
         for rec in records_iter:
             offset = df.tell()
             ln = len(rec)
-            _write_tad_entry(tf, offset, ln, flags=0x04)
+            _write_tad_entry(tf, offset, ln, flags=0x08)
             df.write(rec)
         df.flush()
         os.fsync(df.fileno())
