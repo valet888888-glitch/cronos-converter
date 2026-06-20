@@ -37,7 +37,8 @@ def _looks_like_sql(path: str) -> bool:
 
 def import_csv(path: str, source_name: str = None, table_name: str = None) -> dict:
     source_name = source_name or os.path.basename(path)
-    table_name  = table_name  or os.path.splitext(os.path.basename(path))[0]
+    # Derive table name from source_name (original filename), not path (may be a temp file)
+    table_name  = table_name  or os.path.splitext(os.path.basename(source_name))[0]
     encoding    = detect_encoding(path)
 
     conn = get_conn()
