@@ -223,12 +223,16 @@ class _CroFileWriter:
         kod = koddecoder.new()
         for i, rec in enumerate(self._records):
             encdata = kod.encode(i + 1, rec) if (self.encoding & 1) else rec
-            # CroStru records: content starts at byte[0] (no extra header).
-            # Use flags=0x08 (v4 inline) and pad to blocksize boundary.
-            padded_len = ((len(encdata) + self.blocksize - 1) // self.blocksize) * self.blocksize
-            padded = encdata + b"\x00" * (padded_len - len(encdata))
+            actual_len = len(encdata)
+            # Use ext-rec format (flags=0x00): bytes[0:8]=extofs(0), bytes[8:12]=extlen,
+            # bytes[12:]=content.  extlen stores the ACTUAL content length so the reader
+            # gets exactly actual_len bytes and never sees the zero padding that follows.
+            ext_header = struct.pack("<QL", 0, actual_len)
+            record = ext_header + encdata
+            padded_len = ((len(record) + self.blocksize - 1) // self.blocksize) * self.blocksize
+            padded = record + b"\x00" * (padded_len - len(record))
             offset = len(dat)
-            _write_tad_entry_bytes(tad, offset, padded_len, flags=0x08)
+            _write_tad_entry_bytes(tad, offset, padded_len, flags=0x00)
             dat += padded
 
         return bytes(dat), bytes(tad)
