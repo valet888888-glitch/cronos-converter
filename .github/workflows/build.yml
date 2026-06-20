@@ -15,13 +15,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install pyinstaller flask crodump chardet pywebview
+        run: pip install pyinstaller flask chardet pywebview
 
       - name: Build EXE
         shell: cmd
@@ -32,6 +32,7 @@ jobs:
             --name "cronos_mac" ^
             --add-data "web;web" ^
             --add-data "core;core" ^
+            --add-data "crodump;crodump" ^
             --hidden-import flask ^
             --hidden-import flask.templating ^
             --hidden-import jinja2 ^
@@ -49,7 +50,6 @@ jobs:
             --hidden-import webview ^
             --hidden-import webview.platforms ^
             --hidden-import webview.platforms.winforms ^
-            --collect-all crodump ^
             --collect-all webview ^
             launcher.py
 
@@ -65,4 +65,4 @@ jobs:
           gh release delete latest --yes 2>/dev/null || true
           gh release create latest CronosMac-Windows.zip \
             --title "CronosMac v16 — Windows" \
-            --notes "Готовое приложение для Windows. Скачайте CronosMac-Windows.zip и запустите cronos_mac.exe"
+            --notes "Готовое приложение. Распакуйте zip и запустите cronos_mac.exe"
