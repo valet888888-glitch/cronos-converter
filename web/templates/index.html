@@ -57,7 +57,7 @@ textarea{resize:vertical;font-family:inherit}
 <body>
 <header>
   <h1>⬡ CronosMac</h1>
-  <span>Конвертер баз данных → CronosPRO</span>
+  <span>Конвертер баз данных → CronosPRO &nbsp;v16</span>
 </header>
 
 <div class="layout">
@@ -81,14 +81,19 @@ textarea{resize:vertical;font-family:inherit}
       </div>
 
       <div id="tab-csv" class="tab-content active">
-        <input type="file" id="csv-file" accept=".csv,.tsv,.txt">
-        <button class="btn btn-primary btn-sm" onclick="uploadFile('csv')">Загрузить</button>
+        <div class="hint" style="margin-bottom:6px">Можно выбрать несколько файлов или целую папку</div>
+        <input type="file" id="csv-file" accept=".csv,.tsv,.txt,.sql" multiple style="margin-bottom:4px">
+        <input type="file" id="csv-folder" webkitdirectory style="margin-bottom:4px">
+        <div style="display:flex;gap:6px;margin-bottom:4px">
+          <button class="btn btn-primary btn-sm" onclick="uploadMulti()">Загрузить файлы</button>
+          <button class="btn btn-sm" style="background:#1e293b;color:#94a3b8;border:1px solid #2d3148" onclick="uploadFolder()">Загрузить папку</button>
+        </div>
         <div class="status-msg" id="csv-status"></div>
       </div>
 
       <div id="tab-sql" class="tab-content">
-        <input type="file" id="sql-file" accept=".sql,.gz">
-        <button class="btn btn-primary btn-sm" onclick="uploadFile('sql')">Загрузить</button>
+        <input type="file" id="sql-file" accept=".sql" multiple>
+        <button class="btn btn-primary btn-sm" onclick="uploadMultiSql()">Загрузить</button>
         <div class="status-msg" id="sql-status"></div>
       </div>
 
@@ -185,19 +190,18 @@ function toggleSource(card, name) {
 let _lastExportDir = '';
 
 async function browseFolder(inputId) {
-  try {
-    if (window.pywebview && window.pywebview.api) {
-      const path = await window.pywebview.api.browse_folder();
-      if (path) document.getElementById(inputId).value = path;
-    }
-  } catch(e) { /* pywebview недоступен — пользователь вводит вручную */ }
+  /* Ввод пути вручную — диалог папки недоступен в браузере */
+  document.getElementById(inputId).focus();
 }
 
 async function openExportedFolder() {
+  if (!_lastExportDir) return;
   try {
-    if (window.pywebview && window.pywebview.api && _lastExportDir) {
-      await window.pywebview.api.open_folder(_lastExportDir);
-    }
+    await fetch('/api/open_folder', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({path: _lastExportDir})
+    });
   } catch(e) {}
 }
 
@@ -225,23 +229,79 @@ async function exportSelected() {
   }
 }
 
-async function uploadFile(type) {
-  const input  = document.getElementById(type+'-file');
-  const status = document.getElementById(type+'-status');
-  if (!input.files.length) { status.className='status-msg err'; status.textContent='Выберите файл'; return; }
-  status.className='status-msg'; status.textContent='Загрузка...';
+async function _uploadOneFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  const type = (ext === 'sql') ? 'sql' : 'csv';
   const fd = new FormData();
-  fd.append('file', input.files[0]);
-  const r = await fetch('/api/import/'+type, {method:'POST', body:fd});
-  const j = await r.json();
-  if (j.ok) {
-    status.className='status-msg ok';
-    status.textContent=`✓ ${j.stats.records} записей`;
-    setTimeout(loadSources, 800);
-  } else {
-    status.className='status-msg err';
-    status.textContent='✗ '+(j.error||'Ошибка');
+  fd.append('file', file);
+  const r = await fetch('/api/import/' + type, {method:'POST', body:fd});
+  return r.json();
+}
+
+async function uploadMulti() {
+  const input  = document.getElementById('csv-file');
+  const status = document.getElementById('csv-status');
+  if (!input.files.length) { status.className='status-msg err'; status.textContent='Выберите файлы'; return; }
+  const files = Array.from(input.files);
+  let done = 0, total = 0, errors = [];
+  for (const f of files) {
+    status.className='status-msg'; status.textContent=`Загрузка ${done+1}/${files.length}: ${f.name}...`;
+    try {
+      const j = await _uploadOneFile(f);
+      if (j.ok) { done++; total += j.stats.records || 0; }
+      else errors.push(f.name + ': ' + (j.error||'ошибка'));
+    } catch(e) { errors.push(f.name + ': ' + e); }
   }
+  status.className = errors.length && !done ? 'status-msg err' : 'status-msg ok';
+  status.textContent = `✓ ${done}/${files.length} файлов, ${total} записей` +
+    (errors.length ? '\n✗ ' + errors.join('\n✗ ') : '');
+  setTimeout(loadSources, 500);
+}
+
+async function uploadFolder() {
+  const input  = document.getElementById('csv-folder');
+  const status = document.getElementById('csv-status');
+  if (!input.files.length) { status.className='status-msg err'; status.textContent='Выберите папку'; return; }
+  const files = Array.from(input.files).filter(f => {
+    const ext = f.name.split('.').pop().toLowerCase();
+    return ['csv','tsv','txt','sql'].includes(ext);
+  });
+  if (!files.length) { status.className='status-msg err'; status.textContent='В папке нет CSV/SQL/TXT файлов'; return; }
+  let done = 0, total = 0, errors = [];
+  for (const f of files) {
+    status.className='status-msg'; status.textContent=`Загрузка ${done+1}/${files.length}: ${f.name}...`;
+    try {
+      const j = await _uploadOneFile(f);
+      if (j.ok) { done++; total += j.stats.records || 0; }
+      else errors.push(f.name + ': ' + (j.error||'ошибка'));
+    } catch(e) { errors.push(f.name + ': ' + e); }
+  }
+  status.className = errors.length && !done ? 'status-msg err' : 'status-msg ok';
+  status.textContent = `✓ ${done}/${files.length} файлов, ${total} записей` +
+    (errors.length ? '\n✗ ' + errors.join('\n✗ ') : '');
+  setTimeout(loadSources, 500);
+}
+
+async function uploadMultiSql() {
+  const input  = document.getElementById('sql-file');
+  const status = document.getElementById('sql-status');
+  if (!input.files.length) { status.className='status-msg err'; status.textContent='Выберите файл(ы)'; return; }
+  const files = Array.from(input.files);
+  let done = 0, total = 0, errors = [];
+  for (const f of files) {
+    status.className='status-msg'; status.textContent=`Загрузка ${done+1}/${files.length}: ${f.name}...`;
+    try {
+      const fd = new FormData(); fd.append('file', f);
+      const r = await fetch('/api/import/sql', {method:'POST', body:fd});
+      const j = await r.json();
+      if (j.ok) { done++; total += j.stats.records || 0; }
+      else errors.push(f.name + ': ' + (j.error||'ошибка'));
+    } catch(e) { errors.push(f.name + ': ' + e); }
+  }
+  status.className = errors.length && !done ? 'status-msg err' : 'status-msg ok';
+  status.textContent = `✓ ${done}/${files.length} файлов, ${total} записей` +
+    (errors.length ? '\n✗ ' + errors.join('\n✗ ') : '');
+  setTimeout(loadSources, 500);
 }
 
 async function importCronos() {

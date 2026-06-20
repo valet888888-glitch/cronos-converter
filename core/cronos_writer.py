@@ -6,7 +6,6 @@ Format: v3 (01.02), 32-bit offsets, no KOD encryption, no compression.
 """
 import sys, os, struct, json, re, sqlite3, itertools, hashlib, time
 
-sys.path.insert(0, '/Users/greguar_x/Library/Python/3.9/lib/python/site-packages')
 from crodump import koddecoder
 
 
@@ -115,9 +114,9 @@ def _encode_dbdef(db_name: str, table_recnos: list) -> bytes:
     d = bytearray()
     d += bytes([0x03])                     # record type marker
 
-    # Bank metadata
+    # Bank metadata — byte 1 is the format-version indicator (5 = Cronos 5)
     d += _name("Bank")
-    d += _inline(b"\x00\x02" + b"\x00" * 9)
+    d += _inline(b"\x00\x05" + b"\x00" * 9)
 
     # Unique 8-digit decimal ID — avoids conflict when multiple banks share the same
     # Cronos registry (CroSys.dat). Hardcoded "00000001" conflicts with existing banks.
@@ -148,16 +147,17 @@ def _encode_dbdef(db_name: str, table_recnos: list) -> bytes:
         d += _name(f"Base{i:03d}")
         d += _ref(recno)
 
-    # NS1 — password info (empty password, KOD-encoded)
+    # NS1 — password info (empty password, KOD-encoded).
+    # Serial must match the installed Cronos license serial (default: 1).
     _kod = koddecoder.new()
-    plaintext = struct.pack("<LLL", 0x57, 0, 0) + b"\x00" * 8
+    plaintext = struct.pack("<LLL", 0x01, 0, 0) + b"\x00" * 8
     shift = 0xC2
     d += _name("NS1")
     d += _inline(bytes([0x02, shift]) + _kod.encode(shift, plaintext))
 
     # NS2
     d += _name("NS2")
-    d += _inline(struct.pack("<L", 0x57))
+    d += _inline(struct.pack("<L", 0x01))
 
     # Version — b"\x2d\x35" = ASCII "-5" (Cronos 5 marker; "-6" caused rejection in Cronos 5)
     d += _name("Version")
@@ -166,43 +166,79 @@ def _encode_dbdef(db_name: str, table_recnos: list) -> bytes:
     return bytes(d)
 
 
-# ── CroFile .dat / .tad writer ───────────────────────────────────────────────
+# ── CroFile .dat / .tad writer (v4, 01.11, 64-bit) ───────────────────────────
+
+# Cronos 5 uses format "01.11" (v4).  All .dat files start with a fixed
+# 0x300-byte header area; record offsets in the TAD are relative to file start.
+_DAT_HEADER_AREA = 0x300   # 19 bytes header + 0xE9 random pad + 0x204 zero pad
+
+def _write_dat_header(f, encoding: int, blocksize: int):
+    """Write the 0x300-byte header area of a v4 CroFile .dat file."""
+    f.write(b"CroFile\x00")
+    f.write(struct.pack("<H", 0))          # hdrunk (0 = deterministic)
+    f.write(b"01.11")                      # version — v4, 64-bit
+    f.write(struct.pack("<H", encoding))   # encoding: 0=plain, 1=KOD
+    f.write(struct.pack("<H", blocksize))
+    f.write(b"\x00" * 0xE9)               # traditional random-padding area
+    # Pad to _DAT_HEADER_AREA total
+    written = 19 + 0xE9
+    f.write(b"\x00" * (_DAT_HEADER_AREA - written))
+
+
+def _write_tad_header(f):
+    """Write the 16-byte v4 TAD file header."""
+    f.write(struct.pack("<LLLL", 0xFFFFFFFE, 0, 0, 0))
+
+
+def _write_tad_entry(f, offset: int, ln: int, chk: int = 0, flags: int = 0x04):
+    """
+    Write one 16-byte v4 TAD entry.
+    flags=0x04 → inline data (no ext-rec prefix), same as v3 0x80.
+    flags=0x00 → ext-rec (data prefixed with extofs+extlen).
+    """
+    Q = (flags << 56) | offset
+    f.write(struct.pack("<QLL", Q, ln, chk))
+
 
 class _CroFileWriter:
-    """Build a pair of .dat + .tad CronosPRO files (v3, 32-bit, unencrypted)."""
+    """Build a pair of .dat + .tad CronosPRO files (v4, 01.11, 64-bit)."""
 
-    DAT_HEADER_SIZE = 19 + 0xE9  # 252 bytes
-
-    def __init__(self, blocksize: int = 0x40):
+    def __init__(self, blocksize: int = 0x40, encoding: int = 0):
         self.blocksize = blocksize
+        self.encoding = encoding
         self._records: list[bytes] = []
 
     def add_record(self, data: bytes):
         self._records.append(data)
 
     def build(self) -> tuple[bytes, bytes]:
-        dat = bytearray()
+        dat = bytearray(b"\x00" * _DAT_HEADER_AREA)
+        # Write proper header into the first 19+0xE9 bytes
+        struct.pack_into("<8sH5sHH", dat, 0,
+                         b"CroFile\x00", 0, b"01.11",
+                         self.encoding, self.blocksize)
+
         tad = bytearray()
+        _write_tad_header_bytes(tad)
 
-        # .dat header: magic + unk + version + encoding + blocksize + 0xE9 padding
-        dat += b"CroFile\x00"
-        dat += struct.pack("<H", 0)        # unk
-        dat += b"01.02"                    # version
-        dat += struct.pack("<H", 0)        # encoding: plain, uncompressed
-        dat += struct.pack("<H", self.blocksize)
-        dat += b"\x00" * 0xE9             # padding bytes
-
-        # .tad header: nrdeleted + firstdeleted
-        tad += struct.pack("<LL", 0, 0)
-
-        for rec in self._records:
+        kod = koddecoder.new()
+        for i, rec in enumerate(self._records):
+            encdata = kod.encode(i + 1, rec) if (self.encoding & 1) else rec
             offset = len(dat)
-            ln = len(rec)
-            ln_flags = (0x80 << 24) | ln   # flags=0x80 means inline short record
-            tad += struct.pack("<LLL", offset, ln_flags, 0)
-            dat += rec
+            _write_tad_entry_bytes(tad, offset, len(encdata))
+            dat += encdata
 
         return bytes(dat), bytes(tad)
+
+
+def _write_tad_header_bytes(buf: bytearray):
+    buf += struct.pack("<LLLL", 0xFFFFFFFE, 0, 0, 0)
+
+
+def _write_tad_entry_bytes(buf: bytearray, offset: int, ln: int,
+                           chk: int = 0, flags: int = 0x04):
+    Q = (flags << 56) | offset
+    buf += struct.pack("<QLL", Q, ln, chk)
 
 
 # ── CroBank record encoder ────────────────────────────────────────────────────
@@ -228,19 +264,14 @@ def _encode_bank_record(tableid: int, fields: list, row: dict) -> bytes:
 # ── Streaming CroBank writer ──────────────────────────────────────────────────
 
 def _write_bank_streaming(records_iter, dat_path, tad_path, blocksize=0x0040):
-    """Write CroBank .dat/.tad directly from a record iterator — zero extra RAM."""
+    """Write CroBank .dat/.tad directly from a record iterator — v4 (01.11, 64-bit)."""
     with open(dat_path, 'wb') as df, open(tad_path, 'wb') as tf:
-        df.write(b"CroFile\x00")
-        df.write(struct.pack("<H", 0))
-        df.write(b"01.02")
-        df.write(struct.pack("<H", 0))
-        df.write(struct.pack("<H", blocksize))
-        df.write(b"\x00" * 0xE9)
-        tf.write(struct.pack("<LL", 0, 0))
+        _write_dat_header(df, encoding=0, blocksize=blocksize)
+        _write_tad_header(tf)
         for rec in records_iter:
             offset = df.tell()
             ln = len(rec)
-            tf.write(struct.pack("<LLL", offset, (0x80 << 24) | ln, 0))
+            _write_tad_entry(tf, offset, ln, flags=0x04)
             df.write(rec)
         df.flush()
         os.fsync(df.fileno())
@@ -266,7 +297,7 @@ def write_cronos(tables: list, output_dir: str, db_name: str = "export") -> dict
     os.makedirs(output_dir, exist_ok=True)
     stats = {"tables": 0, "records": 0}
 
-    stru  = _CroFileWriter(blocksize=0x0200)
+    stru  = _CroFileWriter(blocksize=0x0400)
     index = _CroFileWriter(blocksize=0x0400)
 
     table_recnos  = []

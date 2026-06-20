@@ -2,7 +2,6 @@
 Import CronosPRO databases (CroBank/CroStru/CroIndex) via cronodump.
 """
 import sys, os, json
-sys.path.insert(0, '/Users/greguar_x/Library/Python/3.9/lib/python/site-packages')
 
 from .cronos_parser import parse_database
 from .db import get_conn

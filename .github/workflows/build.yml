@@ -5,6 +5,9 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -18,9 +21,9 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install pyinstaller flask cronodump chardet pywebview
+        run: pip install pyinstaller flask crodump chardet pywebview
 
-      - name: Build
+      - name: Build EXE
         shell: cmd
         run: |
           python -m PyInstaller ^
@@ -35,9 +38,7 @@ jobs:
             --hidden-import jinja2.ext ^
             --hidden-import chardet ^
             --hidden-import crodump ^
-            --hidden-import crodump.crofile ^
-            --hidden-import crodump.crodump ^
-            --hidden-import crodump.crobankfile ^
+            --hidden-import crodump.koddecoder ^
             --hidden-import werkzeug ^
             --hidden-import werkzeug.serving ^
             --hidden-import werkzeug.routing ^
@@ -52,9 +53,16 @@ jobs:
             --collect-all webview ^
             launcher.py
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: CronosMac-Windows
-          path: dist/cronos_mac/
-          retention-days: 30
+      - name: Zip result
+        shell: pwsh
+        run: Compress-Archive -Path dist\cronos_mac\* -DestinationPath CronosMac-Windows.zip
+
+      - name: Publish release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          gh release delete latest --yes 2>/dev/null || true
+          gh release create latest CronosMac-Windows.zip \
+            --title "CronosMac v16 — Windows" \
+            --notes "Готовое приложение для Windows. Скачайте CronosMac-Windows.zip и запустите cronos_mac.exe"

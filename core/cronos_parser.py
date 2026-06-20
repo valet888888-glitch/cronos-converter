@@ -6,8 +6,6 @@ Usage:
 """
 import sys, os, json, csv, io, argparse
 
-sys.path.insert(0, '/Users/greguar_x/Library/Python/3.9/lib/python/site-packages')
-
 from crodump.Database import Database
 from crodump import koddecoder
 

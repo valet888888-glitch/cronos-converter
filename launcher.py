@@ -1,56 +1,50 @@
-"""
-CronosMac — нативное окно через pywebview.
-Flask запускается в фоновом потоке, pywebview показывает интерфейс.
-Никакого браузера, никакого терминала.
-"""
-import sys
-import os
-import threading
-import time
-import urllib.request
+import sys, os, threading, time, urllib.request, logging, subprocess, traceback
 
+# Hide console immediately
+if sys.platform == 'win32':
+    try:
+        import ctypes
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 0)
+    except Exception:
+        pass
+
+# Redirect stdout/stderr when frozen (windowed exe)
 if getattr(sys, 'frozen', False):
+    import io
+    if sys.stdout is None: sys.stdout = io.StringIO()
+    if sys.stderr is None: sys.stderr = io.StringIO()
     os.chdir(os.path.dirname(sys.executable))
 
-from app import app as flask_app
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
+logging.getLogger('flask').setLevel(logging.ERROR)
+
+
+def _msgbox(title, msg):
+    try:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(0, str(msg), str(title), 0x10)
+    except Exception:
+        pass
+
+
+# Load Flask app — show error dialog if anything fails
+try:
+    from app import app as flask_app
+except Exception as e:
+    _msgbox('CronosMac - Load Error', traceback.format_exc())
+    sys.exit(1)
 
 PORT = 5055
 
 
 def _run_flask():
-    flask_app.run(host='127.0.0.1', port=PORT, debug=False,
-                  use_reloader=False, threaded=True)
-
-
-class _Api:
-    """JS API: вызывается из JavaScript через window.pywebview.api.*"""
-
-    def __init__(self):
-        self.window = None
-
-    def browse_folder(self):
-        """Показывает диалог выбора папки, возвращает путь или ''."""
-        if not self.window:
-            return ''
-        import webview
-        result = self.window.create_file_dialog(webview.FOLDER_DIALOG)
-        if result:
-            return result[0]
-        return ''
-
-    def open_folder(self, path):
-        """Открывает папку в проводнике / Finder."""
-        if not path or not os.path.isdir(path):
-            return False
-        if sys.platform == 'win32':
-            os.startfile(path)
-        elif sys.platform == 'darwin':
-            import subprocess
-            subprocess.Popen(['open', path])
-        else:
-            import subprocess
-            subprocess.Popen(['xdg-open', path])
-        return True
+    try:
+        flask_app.run(host='127.0.0.1', port=PORT, debug=False,
+                      use_reloader=False, threaded=True)
+    except Exception as e:
+        _msgbox('CronosMac - Flask Error', str(e))
 
 
 def _wait_flask(port, timeout=20):
@@ -58,30 +52,55 @@ def _wait_flask(port, timeout=20):
     while time.time() < deadline:
         try:
             urllib.request.urlopen(f'http://127.0.0.1:{port}/', timeout=0.5)
-            return
+            return True
         except Exception:
             time.sleep(0.1)
+    return False
+
+
+def _open_edge_app(url):
+    for path in [
+        r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
+        r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
+    ]:
+        if os.path.exists(path):
+            subprocess.Popen([path, f'--app={url}', '--window-size=1280,820'])
+            return True
+    try:
+        subprocess.Popen(f'start msedge --app={url}', shell=True)
+        return True
+    except Exception:
+        return False
 
 
 def main():
     t = threading.Thread(target=_run_flask, daemon=True)
     t.start()
-    _wait_flask(PORT)
 
-    import webview
+    if not _wait_flask(PORT):
+        _msgbox('CronosMac - Error', 'Server did not start in 20 seconds.')
+        return
 
-    api = _Api()
-    window = webview.create_window(
-        title='CronosMac — Конвертер баз данных',
-        url=f'http://127.0.0.1:{PORT}',
-        width=1100,
-        height=750,
-        resizable=True,
-        min_size=(800, 500),
-        js_api=api,
-    )
-    api.window = window
-    webview.start()
+    url = f'http://127.0.0.1:{PORT}'
+
+    # Option 1: native window via pywebview
+    try:
+        import webview
+        webview.create_window('CronosMac v16', url,
+                              width=1280, height=820, min_size=(900, 600))
+        webview.start()
+        return
+    except Exception as e:
+        pass  # fall through to Edge
+
+    # Option 2: Edge in app mode (looks like native window)
+    if _open_edge_app(url):
+        threading.Event().wait()
+        return
+
+    _msgbox('CronosMac - Error',
+            'Could not open app window.\n'
+            'Run: python -m pip install pywebview')
 
 
 if __name__ == '__main__':

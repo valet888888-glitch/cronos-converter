@@ -1,15 +1,7 @@
 """
 CronosMac — веб-интерфейс для поиска по базам CronosPRO, CSV и SQL-дампам.
 """
-import os, json, sys, uuid, traceback
-
-if not getattr(sys, 'frozen', False):
-    # В обычном режиме — добавляем путь к site-packages если нужно
-    _sp = '/Users/greguar_x/Library/Python/3.9/lib/python/site-packages'
-    if os.path.isdir(_sp):
-        sys.path.insert(0, _sp)
-
-import tempfile
+import os, json, sys, uuid, traceback, tempfile
 from flask import Flask, request, jsonify, render_template, redirect, url_for
 from core.db import init_db
 from core.search import search, search_cross, list_sources
@@ -60,6 +52,33 @@ def api_sources():
     return jsonify(list_sources())
 
 
+def _make_tmp(ext: str) -> str:
+    """Create a temp file path that works on all platforms including Windows."""
+    import tempfile as _tf
+    fd, path = _tf.mkstemp(suffix=ext, prefix='cm_')
+    os.close(fd)
+    return path
+
+
+@app.post('/api/open_folder')
+def api_open_folder():
+    """Open a folder in Explorer/Finder (called from JS instead of pywebview API)."""
+    data = request.json or {}
+    path = data.get('path', '').strip()
+    if not path or not os.path.isdir(path):
+        return jsonify({"ok": False})
+    try:
+        if sys.platform == 'win32':
+            os.startfile(path)
+        elif sys.platform == 'darwin':
+            import subprocess; subprocess.Popen(['open', path])
+        else:
+            import subprocess; subprocess.Popen(['xdg-open', path])
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
 @app.post('/api/import/csv')
 def api_import_csv():
     if 'file' not in request.files:
@@ -67,7 +86,7 @@ def api_import_csv():
     f = request.files['file']
     orig_name = f.filename or 'file.csv'
     ext = os.path.splitext(orig_name)[1].lower() or '.csv'
-    path = os.path.join(tempfile.gettempdir(), f'cm_{uuid.uuid4().hex}{ext}')
+    path = _make_tmp(ext)
     f.save(path)
     try:
         stats = import_csv(path, source_name=orig_name)
@@ -89,7 +108,7 @@ def api_import_sql():
     f = request.files['file']
     orig_name = f.filename or 'file.sql'
     ext = os.path.splitext(orig_name)[1].lower() or '.sql'
-    path = os.path.join(tempfile.gettempdir(), f'cm_{uuid.uuid4().hex}{ext}')
+    path = _make_tmp(ext)
     f.save(path)
     try:
         stats = import_sql(path, source_name=orig_name)
