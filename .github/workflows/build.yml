@@ -64,5 +64,5 @@ jobs:
         run: |
           gh release delete latest --yes 2>/dev/null || true
           gh release create latest CronosMac-Windows.zip \
-            --title "CronosMac v16 — Windows" \
+            --title "CronosMac v20 — Windows" \
             --notes "Готовое приложение. Распакуйте zip и запустите cronos_mac.exe"

@@ -74,7 +74,7 @@ def _encode_field(idx: int, name: str, typ: int, maxval: int = 256) -> bytes:
 
 # ── TableDefinition encoder ─────────────────────────────────────────────────
 
-def _encode_table(tableid: int, name: str, field_defs: list) -> bytes:
+def _encode_table(tableid: int, name: str, field_defs: list, record_count: int = 0) -> bytes:
     """Build raw bytes for a TableDefinition (stored as CroStru record)."""
     d = bytearray()
     d += struct.pack("<H", 0)              # unk1
@@ -83,7 +83,7 @@ def _encode_table(tableid: int, name: str, field_defs: list) -> bytes:
     d += bytes([9])                        # unk2 = 9
     d += bytes([1])                        # unk3 = 1
     d += struct.pack("<L", 2)              # extra dword (unk2 > 5)
-    d += struct.pack("<L", 0)              # unk4
+    d += struct.pack("<L", record_count)   # record count (unk4)
     d += struct.pack("<L", tableid)        # tableid
     abbrev = name[:2]
     d += _name(name)
@@ -269,9 +269,12 @@ def _write_bank_streaming(records_iter, dat_path, tad_path, blocksize=0x0040):
         _write_tad_header(tf)
         for rec in records_iter:
             offset = df.tell()
-            ln = len(rec)
-            _write_tad_entry(tf, offset, ln, flags=0x08)
+            # Pad record to multiple of blocksize — CronosPRO requires aligned record sizes
+            padded_len = ((len(rec) + blocksize - 1) // blocksize) * blocksize
+            _write_tad_entry(tf, offset, padded_len, flags=0x08)
             df.write(rec)
+            if padded_len > len(rec):
+                df.write(b'\x00' * (padded_len - len(rec)))
         df.flush()
         os.fsync(df.fileno())
         tf.flush()
@@ -315,10 +318,12 @@ def write_cronos(tables: list, output_dir: str, db_name: str = "export") -> dict
         if isinstance(records, (list, tuple)):
             sample       = records[:100]
             records_iter = iter(records)
+            record_count = len(records)
         else:
             it           = iter(records)
             sample       = list(itertools.islice(it, 100))
             records_iter = itertools.chain(sample, it)
+            record_count = 0  # unknown for generators
 
         field_defs = [_encode_field(0, "Системный номер", 0)]
         for i, fname in enumerate(user_fields, 1):
@@ -326,7 +331,7 @@ def write_cronos(tables: list, output_dir: str, db_name: str = "export") -> dict
             typ, maxval = _infer_type(samples)
             field_defs.append(_encode_field(i, fname, typ, maxval))
 
-        tdef_bytes = _encode_table(tableid, tname, field_defs)
+        tdef_bytes = _encode_table(tableid, tname, field_defs, record_count=record_count)
         stru_recno = len(stru._records) + 1
         stru.add_record(b"\x04" + tdef_bytes)
         table_recnos.append(stru_recno)
