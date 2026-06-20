@@ -223,16 +223,10 @@ class _CroFileWriter:
         kod = koddecoder.new()
         for i, rec in enumerate(self._records):
             encdata = kod.encode(i + 1, rec) if (self.encoding & 1) else rec
-            actual_len = len(encdata)
-            # Use ext-rec format (flags=0x00): bytes[0:8]=extofs(0), bytes[8:12]=extlen,
-            # bytes[12:]=content.  extlen stores the ACTUAL content length so the reader
-            # gets exactly actual_len bytes and never sees the zero padding that follows.
-            ext_header = struct.pack("<QL", 0, actual_len)
-            record = ext_header + encdata
-            padded_len = ((len(record) + self.blocksize - 1) // self.blocksize) * self.blocksize
-            padded = record + b"\x00" * (padded_len - len(record))
+            padded_len = ((len(encdata) + self.blocksize - 1) // self.blocksize) * self.blocksize
+            padded = encdata + b"\x00" * (padded_len - len(encdata))
             offset = len(dat)
-            _write_tad_entry_bytes(tad, offset, padded_len, flags=0x00)
+            _write_tad_entry_bytes(tad, offset, padded_len, flags=0x08)
             dat += padded
 
         return bytes(dat), bytes(tad)
@@ -307,7 +301,7 @@ def write_cronos(tables: list, output_dir: str, db_name: str = "export") -> dict
     os.makedirs(output_dir, exist_ok=True)
     stats = {"tables": 0, "records": 0}
 
-    stru  = _CroFileWriter(blocksize=0x0400)
+    stru  = _CroFileWriter(blocksize=0x0400, encoding=1)
     index = _CroFileWriter(blocksize=0x0400)
 
     table_recnos  = []
