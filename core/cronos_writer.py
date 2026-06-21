@@ -146,17 +146,9 @@ def _encode_dbdef(db_name: str, table_recnos: list) -> bytes:
         d += _name(f"Base{i:03d}")
         d += _ref(recno)
 
-    # NS1 — password info (empty password, KOD-encoded).
-    # Serial must match the installed Cronos license serial (default: 1).
-    _kod = koddecoder.new()
-    plaintext = struct.pack("<LLL", 0x01, 0, 0) + b"\x00" * 8
-    shift = 0xC2
-    d += _name("NS1")
-    d += _inline(bytes([0x02, shift]) + _kod.encode(shift, plaintext))
-
-    # NS2
+    # NS2 — bank lock flag (0 = open/no password; omitting NS1 avoids serial mismatch)
     d += _name("NS2")
-    d += _inline(struct.pack("<L", 0x01))
+    d += _inline(struct.pack("<L", 0x00))
 
     # Version — b"\x2d\x35" = ASCII "-5" (Cronos 5 marker; "-6" caused rejection in Cronos 5)
     d += _name("Version")
@@ -301,7 +293,7 @@ def write_cronos(tables: list, output_dir: str, db_name: str = "export") -> dict
     os.makedirs(output_dir, exist_ok=True)
     stats = {"tables": 0, "records": 0}
 
-    stru  = _CroFileWriter(blocksize=0x0400, encoding=1)
+    stru  = _CroFileWriter(blocksize=0x0400, encoding=0)
     index = _CroFileWriter(blocksize=0x0400)
 
     table_recnos  = []
