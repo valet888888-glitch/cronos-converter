@@ -146,9 +146,16 @@ def _encode_dbdef(db_name: str, table_recnos: list) -> bytes:
         d += _name(f"Base{i:03d}")
         d += _ref(recno)
 
-    # NS2 — bank lock flag (0 = open/no password; omitting NS1 avoids serial mismatch)
+    # NS1 — password info (empty password, KOD-encoded with INITIAL_KOD).
+    _kod = koddecoder.new()
+    plaintext = struct.pack("<LLL", 0x01, 0, 0) + b"\x00" * 8
+    shift = 0xC2
+    d += _name("NS1")
+    d += _inline(bytes([0x02, shift]) + _kod.encode(shift, plaintext))
+
+    # NS2
     d += _name("NS2")
-    d += _inline(struct.pack("<L", 0x00))
+    d += _inline(struct.pack("<L", 0x01))
 
     # Version — b"\x2d\x35" = ASCII "-5" (Cronos 5 marker; "-6" caused rejection in Cronos 5)
     d += _name("Version")
@@ -218,7 +225,7 @@ class _CroFileWriter:
             padded_len = ((len(encdata) + self.blocksize - 1) // self.blocksize) * self.blocksize
             padded = encdata + b"\x00" * (padded_len - len(encdata))
             offset = len(dat)
-            _write_tad_entry_bytes(tad, offset, padded_len, flags=0x08)
+            _write_tad_entry_bytes(tad, offset, padded_len, flags=0x04)
             dat += padded
 
         return bytes(dat), bytes(tad)
