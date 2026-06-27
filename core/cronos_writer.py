@@ -166,7 +166,7 @@ _DAT_HEADER_AREA = 0x300   # 19 bytes header + 0xE9 random pad + 0x204 zero pad
 def _write_dat_header(f, encoding: int, blocksize: int):
     """Write the 0x300-byte header area of a v4 CroFile .dat file."""
     f.write(b"CroFile\x00")
-    f.write(struct.pack("<H", 0))          # hdrunk (0 = deterministic)
+    f.write(struct.pack("<H", 0x0206))     # hdrunk — matches CronosPRO v4 format
     f.write(b"01.11")                      # version — v4, 64-bit
     f.write(struct.pack("<H", encoding))   # encoding: 0=plain, 1=KOD
     f.write(struct.pack("<H", blocksize))
@@ -206,7 +206,7 @@ class _CroFileWriter:
         dat = bytearray(b"\x00" * _DAT_HEADER_AREA)
         # Write proper header into the first 19+0xE9 bytes
         struct.pack_into("<8sH5sHH", dat, 0,
-                         b"CroFile\x00", 0, b"01.11",
+                         b"CroFile\x00", 0x0206, b"01.11",
                          self.encoding, self.blocksize)
 
         tad = bytearray()
