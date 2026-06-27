@@ -214,9 +214,16 @@ class _CroFileWriter:
 
         kod = koddecoder.new()
         for i, rec in enumerate(self._records):
-            encdata = kod.encode(i + 1, rec) if (self.encoding & 1) else rec
-            padded_len = ((len(encdata) + self.blocksize - 1) // self.blocksize) * self.blocksize
-            padded = encdata + b"\x00" * (padded_len - len(encdata))
+            recno = i + 1
+            if self.encoding & 1:
+                # v4 format: [8 zero bytes][4-byte LE content_len][KOD-encoded content][zero padding]
+                # Only the content portion is KOD-encoded; the 12-byte header is stored plain.
+                encdata = kod.encode(recno, rec)
+                raw_block = b"\x00" * 8 + struct.pack("<L", len(rec)) + encdata
+            else:
+                raw_block = rec
+            padded_len = ((len(raw_block) + self.blocksize - 1) // self.blocksize) * self.blocksize
+            padded = raw_block + b"\x00" * (padded_len - len(raw_block))
             offset = len(dat)
             _write_tad_entry_bytes(tad, offset, padded_len, flags=0x08)
             dat += padded
