@@ -293,7 +293,7 @@ def write_cronos(tables: list, output_dir: str, db_name: str = "export") -> dict
     os.makedirs(output_dir, exist_ok=True)
     stats = {"tables": 0, "records": 0}
 
-    stru  = _CroFileWriter(blocksize=0x0400, encoding=0)
+    stru  = _CroFileWriter(blocksize=0x0400, encoding=1)  # KOD-encrypted, matches reference
     index = _CroFileWriter(blocksize=0x0400)
 
     table_recnos  = []
